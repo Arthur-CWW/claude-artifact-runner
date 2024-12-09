@@ -36,6 +36,7 @@ enum AudioEncoding {
   LINEAR16 = "linear16",
   MULAW = "mulaw",
   MP3 = "mp3",
+  OPUS = "opus",
 }
 
 enum SynthesizerType {
@@ -169,7 +170,7 @@ const WebSocketClient = () => {
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 
-  const connectWebSocket = (aiProfileId: string) => {
+  const connectWebSocket = (aiProfileId: number) => {
     try {
       const ws = new WebSocket(
         `ws://localhost:3000/websocket_call/${aiProfileId}`
@@ -183,7 +184,7 @@ const WebSocketClient = () => {
           type: WebSocketMessageType.AUDIO_CONFIG_START,
           input_audio_config: {
             audio_encoding: AudioEncoding.LINEAR16,
-            sampling_rate: 16000,
+            sampling_rate: 48000,
             chunk_size: 2048, // Added required chunk_size
             audio_channel_count: 1,
           },
@@ -313,7 +314,7 @@ const WebSocketClient = () => {
 
         <div className="flex space-x-2">
           <Button
-            onClick={() => connectWebSocket("test-profile")}
+            onClick={() => connectWebSocket(145)}
             disabled={isConnected}
             className="flex-1"
           >
