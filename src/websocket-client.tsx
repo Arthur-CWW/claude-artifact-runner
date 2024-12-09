@@ -183,7 +183,7 @@ const WebSocketClient = () => {
         const configMessage: AudioConfigStartMessage = {
           type: WebSocketMessageType.AUDIO_CONFIG_START,
           input_audio_config: {
-            audio_encoding: AudioEncoding.LINEAR16,
+            audio_encoding: AudioEncoding.LINEAR16, // this is done on the python side
             sampling_rate: 48000,
             chunk_size: 2048, // Added required chunk_size
             audio_channel_count: 1,
@@ -256,7 +256,7 @@ const WebSocketClient = () => {
         }
       };
 
-      mediaRecorder.start(100);
+      mediaRecorder.start(43); // 2048 / 48000 = 0.043 seconds
       mediaRecorderRef.current = mediaRecorder;
       setIsRecording(true);
     } catch (err) {
