@@ -39,48 +39,37 @@ enum AudioEncoding {
   OPUS = "opus",
 }
 
-enum SynthesizerType {
-  BASE = "base",
-}
-
 // Base Interfaces
 interface Event {
   conversation_id: string;
 }
 
-interface TypedModel {
-  type: string;
-}
-
 // Event Interfaces
-interface TranscriptEvent extends Event {
-  type: EventType.TRANSCRIPT;
-  text: string;
-  sender: Sender;
-  timestamp: number;
-}
-
-interface PhoneCallConnectedEvent extends Event {
-  type: EventType.PHONE_CALL_CONNECTED;
-  to_phone_number: string;
-  from_phone_number: string;
-}
-
-interface PhoneCallEndedEvent extends Event {
-  type: EventType.PHONE_CALL_ENDED;
-  conversation_minutes: number;
-}
-
-interface RecordingEvent extends Event {
-  type: EventType.RECORDING;
-  recording_url: string;
-}
-
-interface ActionEvent extends Event {
-  type: EventType.ACTION;
-  action_input?: Record<string, any>;
-  action_output?: Record<string, any>;
-}
+type ConversationEvent =
+  | ({
+      type: EventType.TRANSCRIPT;
+      text: string;
+      sender: Sender;
+      timestamp: number;
+    } & Event)
+  | ({
+      type: EventType.PHONE_CALL_CONNECTED;
+      to_phone_number: string;
+      from_phone_number: string;
+    } & Event)
+  | ({
+      type: EventType.PHONE_CALL_ENDED;
+      conversation_minutes: number;
+    } & Event)
+  | ({
+      type: EventType.RECORDING;
+      recording_url: string;
+    } & Event)
+  | ({
+      type: EventType.ACTION;
+      action_input?: Record<string, unknown>;
+      action_output?: Record<string, unknown>;
+    } & Event);
 
 // Config Interfaces
 interface InputAudioConfig {
@@ -119,47 +108,38 @@ interface SynthesizerConfig {
   should_encode_as_wav: boolean;
   sentiment_config?: SentimentConfig;
 }
-
-// WebSocket Message Interfaces
-interface WebSocketMessage extends TypedModel {
-  type: WebSocketMessageType;
-}
-
-interface AudioMessage extends WebSocketMessage {
-  type: WebSocketMessageType.AUDIO;
-  data: string;
-}
-
-interface TranscriptMessage extends WebSocketMessage {
-  type: WebSocketMessageType.TRANSCRIPT;
-  text: string;
-  sender: Sender;
-  timestamp: number;
-}
-
-interface StartMessage extends WebSocketMessage {
-  type: WebSocketMessageType.START;
-  transcriber_config: TranscriberConfig;
-  agent_config: AgentConfig;
-  synthesizer_config: SynthesizerConfig;
-  conversation_id?: string;
-}
-
-interface AudioConfigStartMessage extends WebSocketMessage {
-  type: WebSocketMessageType.AUDIO_CONFIG_START;
-  input_audio_config: InputAudioConfig;
-  output_audio_config: OutputAudioConfig;
-  conversation_id?: string;
-  subscribe_transcript?: boolean;
-}
-
-interface ReadyMessage extends WebSocketMessage {
-  type: WebSocketMessageType.READY;
-}
-
-interface StopMessage extends WebSocketMessage {
-  type: WebSocketMessageType.STOP;
-}
+// WebSocket Message Types
+type WebSocketMessage =
+  | {
+      type: WebSocketMessageType.AUDIO;
+      data: string;
+    }
+  | {
+      type: WebSocketMessageType.TRANSCRIPT;
+      text: string;
+      sender: Sender;
+      timestamp: number;
+    }
+  | {
+      type: WebSocketMessageType.START;
+      transcriber_config: TranscriberConfig;
+      agent_config: AgentConfig;
+      synthesizer_config: SynthesizerConfig;
+      conversation_id?: string;
+    }
+  | {
+      type: WebSocketMessageType.AUDIO_CONFIG_START;
+      input_audio_config: InputAudioConfig;
+      output_audio_config: OutputAudioConfig;
+      conversation_id?: string;
+      subscribe_transcript?: boolean;
+    }
+  | {
+      type: WebSocketMessageType.READY;
+    }
+  | {
+      type: WebSocketMessageType.STOP;
+    };
 
 const WebSocketClient = () => {
   const [isConnected, setIsConnected] = useState(false);
@@ -169,6 +149,7 @@ const WebSocketClient = () => {
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   const connectWebSocket = (aiProfileId: number) => {
     try {
@@ -180,7 +161,7 @@ const WebSocketClient = () => {
         setIsConnected(true);
         setError("");
 
-        const configMessage: AudioConfigStartMessage = {
+        const configMessage = {
           type: WebSocketMessageType.AUDIO_CONFIG_START,
           input_audio_config: {
             audio_encoding: AudioEncoding.LINEAR16, // this is done on the python side
@@ -194,7 +175,7 @@ const WebSocketClient = () => {
             audio_channel_count: 1,
           },
           subscribe_transcript: true,
-        };
+        } satisfies WebSocketMessage;
         ws.send(JSON.stringify(configMessage));
       };
 
@@ -206,6 +187,8 @@ const WebSocketClient = () => {
 
           if (message.type === WebSocketMessageType.READY) {
             startRecording();
+          } else if (message.type === WebSocketMessageType.AUDIO) {
+            playAudio(message.data);
           }
         } catch (err) {
           console.error("Error parsing message:", err);
@@ -245,10 +228,10 @@ const WebSocketClient = () => {
           const reader = new FileReader();
           reader.onload = () => {
             const base64data = (reader.result as string).split(",")[1];
-            const audioMessage: AudioMessage = {
+            const audioMessage = {
               type: WebSocketMessageType.AUDIO,
               data: base64data,
-            };
+            } satisfies WebSocketMessage;
             console.log("Sending audio message:", audioMessage); // Debug log
             wsRef.current?.send(JSON.stringify(audioMessage));
           };
@@ -280,18 +263,49 @@ const WebSocketClient = () => {
 
   const disconnect = () => {
     if (wsRef.current) {
-      const stopMessage: StopMessage = {
+      const stopMessage = {
         type: WebSocketMessageType.STOP,
-      };
+      } satisfies WebSocketMessage;
       wsRef.current.send(JSON.stringify(stopMessage));
       wsRef.current.close();
     }
     stopRecording();
   };
 
+  const playAudio = async (audioData: string) => {
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext();
+      }
+
+      // Decode base64 audio data
+      const binaryData = atob(audioData);
+      const arrayBuffer = new ArrayBuffer(binaryData.length);
+      const view = new Uint8Array(arrayBuffer);
+      for (let i = 0; i < binaryData.length; i++) {
+        view[i] = binaryData.charCodeAt(i);
+      }
+
+      // Decode audio data and play it
+      const audioBuffer = await audioContextRef.current.decodeAudioData(
+        arrayBuffer
+      );
+      const source = audioContextRef.current.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContextRef.current.destination);
+      source.start();
+    } catch (err) {
+      console.error("Error playing audio:", err);
+      setError("Failed to play audio response");
+    }
+  };
+
   useEffect(() => {
     return () => {
       disconnect();
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
     };
   }, []);
 
