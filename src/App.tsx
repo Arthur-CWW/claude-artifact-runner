@@ -1,12 +1,13 @@
-import './App.css'
-import Artifact from './artifact-component'
+import WebsocketClient from "@/websocket-client";
+import "./App.css";
 
 function App() {
   return (
     <>
-      <Artifact />
+      <WebsocketClient />
+      {/* <Artifact /> */}
     </>
-  )
+  );
 }
 
-export default App
+export default App;
