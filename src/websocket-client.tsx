@@ -314,7 +314,7 @@ const WebSocketClient = () => {
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           <span>WebSocket Call Interface</span>
-          <Badge variant={isConnected ? "success" : "destructive"}>
+          <Badge variant={isConnected ? "default" : "destructive"}>
             {isConnected ? "Connected" : "Disconnected"}
           </Badge>
         </CardTitle>
@@ -364,14 +364,12 @@ const WebSocketClient = () => {
                   <>
                     <Badge
                       variant={
-                        (message as TranscriptMessage).sender === Sender.BOT
-                          ? "secondary"
-                          : "default"
+                        message.sender === Sender.BOT ? "secondary" : "default"
                       }
                     >
-                      {(message as TranscriptMessage).sender}
+                      {message.sender}
                     </Badge>
-                    <span>{(message as TranscriptMessage).text}</span>
+                    <span>{message.text}</span>
                   </>
                 )}
               </div>
