@@ -161,25 +161,6 @@ interface StopMessage extends WebSocketMessage {
   type: WebSocketMessageType.STOP;
 }
 
-// Add this audio worklet processor code as a string constant
-const audioWorkletCode = `
-class AudioProcessor extends AudioWorkletProcessor {
-  process(inputs, outputs) {
-    const input = inputs[0][0];
-    if (input) {
-      // Convert float32 to int16
-      const pcmData = new Int16Array(input.length);
-      for (let i = 0; i < input.length; i++) {
-        pcmData[i] = Math.max(-1, Math.min(1, input[i])) * 0x7FFF;
-      }
-      this.port.postMessage(pcmData.buffer);
-    }
-    return true;
-  }
-}
-registerProcessor('audio-processor', AudioProcessor);
-`;
-
 const WebSocketClient = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -203,7 +184,7 @@ const WebSocketClient = () => {
           type: WebSocketMessageType.AUDIO_CONFIG_START,
           input_audio_config: {
             audio_encoding: AudioEncoding.LINEAR16,
-            sampling_rate: 16000,
+            sampling_rate: 48000,
             chunk_size: 2048, // Added required chunk_size
             audio_channel_count: 1,
           },
@@ -252,58 +233,31 @@ const WebSocketClient = () => {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      // Create AudioContext with 16kHz sample rate
-      const audioContext = new AudioContext({ sampleRate: 16000 });
-
-      // Create a blob URL for the audio worklet code
-      const blob = new Blob([audioWorkletCode], {
-        type: "application/javascript",
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: "audio/webm;codecs=pcm",
       });
-      const workletUrl = URL.createObjectURL(blob);
 
-      // Load the audio worklet module
-      await audioContext.audioWorklet.addModule(workletUrl);
-
-      // Create audio worklet node
-      const workletNode = new AudioWorkletNode(audioContext, "audio-processor");
-
-      // Create and connect source
-      const source = audioContext.createMediaStreamSource(stream);
-      source.connect(workletNode);
-      workletNode.connect(audioContext.destination);
-
-      // Handle messages from the audio worklet
-      workletNode.port.onmessage = (event) => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          // Convert ArrayBuffer to base64
-          const buffer = new Uint8Array(event.data);
-          const base64data = btoa(
-            Array.from(buffer)
-              .map((b) => String.fromCharCode(b))
-              .join("")
-          );
-
-          const audioMessage: AudioMessage = {
-            type: WebSocketMessageType.AUDIO,
-            data: base64data,
+      mediaRecorder.ondataavailable = (event) => {
+        if (
+          event.data.size > 0 &&
+          wsRef.current?.readyState === WebSocket.OPEN
+        ) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64data = (reader.result as string).split(",")[1];
+            const audioMessage: AudioMessage = {
+              type: WebSocketMessageType.AUDIO,
+              data: base64data,
+            };
+            console.log("Sending audio message:", audioMessage); // Debug log
+            wsRef.current?.send(JSON.stringify(audioMessage));
           };
-          wsRef.current?.send(JSON.stringify(audioMessage));
+          reader.readAsDataURL(event.data);
         }
       };
 
-      // Store references for cleanup
-      mediaRecorderRef.current = {
-        stop: () => {
-          workletNode.disconnect();
-          source.disconnect();
-          stream.getTracks().forEach((track) => track.stop());
-          URL.revokeObjectURL(workletUrl);
-        },
-        stream,
-        state: "recording",
-      } as MediaRecorder;
-
+      mediaRecorder.start(100);
+      mediaRecorderRef.current = mediaRecorder;
       setIsRecording(true);
     } catch (err) {
       console.error("Recording error:", err);
