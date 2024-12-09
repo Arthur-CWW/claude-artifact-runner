@@ -1,31 +1,37 @@
-import React, { useState } from 'react';
-import { AlertCircle, Mail, Lock, User, Github, Facebook, Twitter } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { AlertCircle, Facebook, Github, Twitter } from "lucide-react";
+import { useState } from "react";
 
 const LoginForm = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [website, setWebsite] = useState('');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [website, setWebsite] = useState("");
+  const [error, setError] = useState("");
 
-  const handleLogin = (e) => {
+  const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!email || !password || !website) {
-      setError('Please fill in all fields');
+      setError("Please fill in all fields");
     } else {
-      setError('');
-      console.log('Login attempted:', { email, password, website });
+      setError("");
+      console.log("Login attempted:", { email, password, website });
       // Here you would typically handle the login logic
       alert(`Login attempted: ${email}, ${password}, ${website}`);
     }
   };
 
-  const handleSocialLogin = (platform) => {
+  const handleSocialLogin = (platform: string) => {
     console.log(`${platform} login attempted`);
     // Here you would typically handle the social login logic
     alert(`${platform} login attempted`);
@@ -35,7 +41,9 @@ const LoginForm = () => {
     <div className="flex items-center justify-center min-h-screen bg-gray-100">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle className="text-2xl font-bold text-center">Demo Component</CardTitle>
+          <CardTitle className="text-2xl font-bold text-center">
+            Demo Component
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-4">
@@ -47,7 +55,7 @@ const LoginForm = () => {
                 placeholder="Enter your email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                icon={<Mail className="h-4 w-4 text-gray-500" />}
+                // icon={<Mail className="h-4 w-4 text-gray-500" />}
               />
             </div>
             <div className="space-y-2">
@@ -58,7 +66,7 @@ const LoginForm = () => {
                 placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                icon={<Lock className="h-4 w-4 text-gray-500" />}
+                // icon={<Lock className="h-4 w-4 text-gray-500" />}
               />
             </div>
             <div className="space-y-2">
@@ -74,7 +82,9 @@ const LoginForm = () => {
                 </SelectContent>
               </Select>
             </div>
-            <Button type="submit" className="w-full">Log In</Button>
+            <Button type="submit" className="w-full">
+              Log In
+            </Button>
           </form>
 
           {error && (
@@ -89,24 +99,38 @@ const LoginForm = () => {
               <span className="w-full border-t" />
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
+              <span className="bg-background px-2 text-muted-foreground">
+                Or continue with
+              </span>
             </div>
           </div>
 
           <div className="flex space-x-4 mt-6">
-            <Button variant="outline" className="w-full" onClick={() => handleSocialLogin('Github')}>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => handleSocialLogin("Github")}
+            >
               <Github className="mr-2 h-4 w-4" /> Github
             </Button>
-            <Button variant="outline" className="w-full" onClick={() => handleSocialLogin('Facebook')}>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => handleSocialLogin("Facebook")}
+            >
               <Facebook className="mr-2 h-4 w-4" /> Facebook
             </Button>
-            <Button variant="outline" className="w-full" onClick={() => handleSocialLogin('Twitter')}>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => handleSocialLogin("Twitter")}
+            >
               <Twitter className="mr-2 h-4 w-4" /> Twitter
             </Button>
           </div>
 
           <div className="text-center text-sm mt-6">
-            Don't have an account?{' '}
+            Don't have an account?{" "}
             <Button variant="link" className="p-0">
               Sign up
             </Button>
