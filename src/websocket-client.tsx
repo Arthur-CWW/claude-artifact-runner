@@ -233,14 +233,20 @@ const WebSocketClient = () => {
       const inputBuffer = event.inputBuffer.getChannelData(0);
 
       // Convert int16 to base64
-      const uint8View = new Uint8Array(inputBuffer.buffer);
-      // let binaryString = "";
-      // for (let i = 0; i < uint8View.length; i++) {
-      //   binaryString += String.fromCharCode(uint8View[i]);
-      // }
-      const int8 = Array.from(uint8View);
-      const base64data = btoa(String.fromCharCode.apply(null, int8));
-      // const base64data = btoa(binaryString);
+      // const uint8View = new Uint8Array(inputBuffer.buffer);
+      // const int8 = Array.from(uint8View);
+      // const base64data = btoa(String.fromCharCode.apply(null, int8));
+
+      // const base64data = btoa(
+      //   String.fromCharCode.apply(null, Array.from(inputBuffer))
+      // );
+      // This function is only provided for compatibility with legacy web platform APIs and should never be used in new code, because they use strings to represent binary data and predate the introduction of typed arrays in JavaScript. For code running using Node.js APIs, converting between base64-encoded strings and binary data should be performed using Buffer.from(str, 'base64') and buf.toString('base64').
+      const base64data = btoa(
+        String.fromCharCode(...new Uint8Array(inputBuffer.buffer))
+      );
+      // Only works in node
+      // const base64data = Buffer.from(inputBuffer).toString("base64");
+      // console.assert(method2 === base64data, "method2 !== base64data");
 
       // Send via WebSocket
       const audioMessage = {
@@ -284,13 +290,15 @@ const WebSocketClient = () => {
       }
 
       // Decode base64 audio data
-      const binaryData = atob(audioData);
-      const arrayBuffer = new ArrayBuffer(binaryData.length);
-      const view = new Uint8Array(arrayBuffer);
-      for (let i = 0; i < binaryData.length; i++) {
-        view[i] = binaryData.charCodeAt(i);
-      }
-
+      // const binaryData = atob(audioData);
+      // const arrayBuffer = new ArrayBuffer(binaryData.length);
+      // const view = new Uint8Array(arrayBuffer);
+      // for (let i = 0; i < binaryData.length; i++) {
+      //   view[i] = binaryData.charCodeAt(i);
+      // }
+      const arrayBuffer = Uint8Array.from(atob(audioData), (c) =>
+        c.charCodeAt(0)
+      ).buffer;
       // Decode audio data and play it
       const audioBuffer = await audioContextRef.current.decodeAudioData(
         arrayBuffer
