@@ -212,40 +212,45 @@ const WebSocketClient = () => {
       setError("Failed to connect to WebSocket server");
     }
   };
+  const sampleRate = 48000; // Match the server and your desired rate
+  const chunkSize = 2048;
 
   const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "audio/webm;codecs=pcm",
-      });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      mediaRecorder.ondataavailable = (event) => {
-        if (
-          event.data.size > 0 &&
-          wsRef.current?.readyState === WebSocket.OPEN
-        ) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64data = (reader.result as string).split(",")[1];
-            const audioMessage = {
-              type: WebSocketMessageType.AUDIO,
-              data: base64data,
-            } satisfies WebSocketMessage;
-            console.log("Sending audio message:", audioMessage); // Debug log
-            wsRef.current?.send(JSON.stringify(audioMessage));
-          };
-          reader.readAsDataURL(event.data);
-        }
+    // Create AudioContext and connect the stream
+    const audioContext = new AudioContext({ sampleRate });
+    const source = audioContext.createMediaStreamSource(stream);
+
+    // Create a ScriptProcessorNode with a 2048 frame buffer
+    const processor = audioContext.createScriptProcessor(chunkSize, 1, 1);
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+
+    processor.onaudioprocess = (event) => {
+      // Give up on webm encoding ;(
+      // Webm not sending the raw bytes
+      const inputBuffer = event.inputBuffer.getChannelData(0);
+
+      // Convert int16 to base64
+      const uint8View = new Uint8Array(inputBuffer.buffer);
+      // let binaryString = "";
+      // for (let i = 0; i < uint8View.length; i++) {
+      //   binaryString += String.fromCharCode(uint8View[i]);
+      // }
+      const int8 = Array.from(uint8View);
+      const base64data = btoa(String.fromCharCode.apply(null, int8));
+      // const base64data = btoa(binaryString);
+
+      // Send via WebSocket
+      const audioMessage = {
+        type: "websocket_audio", // your message type
+        data: base64data,
       };
-
-      mediaRecorder.start(43); // 2048 / 48000 = 0.043 seconds
-      mediaRecorderRef.current = mediaRecorder;
-      setIsRecording(true);
-    } catch (err) {
-      console.error("Recording error:", err);
-      setError("Failed to start recording");
-    }
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify(audioMessage));
+      }
+    };
   };
 
   const stopRecording = () => {
