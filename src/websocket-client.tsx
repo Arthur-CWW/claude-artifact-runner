@@ -140,6 +140,45 @@ type WebSocketMessage =
   | {
       type: WebSocketMessageType.STOP;
     };
+const writeString = (view: DataView, offset: number, string: string) => {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+};
+const encodeWAV = (
+  pcmData: Uint8Array,
+  sampleRate: number,
+  numChannels: number,
+  bitsPerSample: number
+): ArrayBuffer => {
+  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+  const dataSize = pcmData.length;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  // Wav header
+  writeString(view, 0, "RIFF"); /* RIFF identifier */
+  view.setUint32(4, 36 + dataSize, true); /* file length */
+  writeString(view, 8, "WAVE"); /* RIFF type */
+  writeString(view, 12, "fmt "); /* format chunk identifier */
+  view.setUint32(16, 16, true); /* format chunk length */
+  view.setUint16(20, 1, true); /* sample format (raw) */
+  view.setUint16(22, numChannels, true); /* channel count */
+  view.setUint32(24, sampleRate, true); /* sample rate */
+  view.setUint32(28, byteRate, true); /* byte rate */
+  view.setUint16(32, blockAlign, true); /* block align */
+  view.setUint16(34, bitsPerSample, true); /* bits per sample */
+  writeString(view, 36, "data"); /* data chunk identifier */
+  view.setUint32(40, dataSize, true); /* data chunk length */
+
+  for (let i = 0; i < pcmData.length; i++) {
+    // concat data
+    view.setUint8(44 + i, pcmData[i]);
+  }
+
+  return buffer;
+};
 
 const WebSocketClient = () => {
   const [isConnected, setIsConnected] = useState(false);
@@ -171,7 +210,7 @@ const WebSocketClient = () => {
           },
           output_audio_config: {
             audio_encoding: AudioEncoding.LINEAR16,
-            sampling_rate: 16000,
+            sampling_rate: 48000,
             audio_channel_count: 1,
           },
           subscribe_transcript: true,
@@ -240,7 +279,6 @@ const WebSocketClient = () => {
       // const base64data = btoa(
       //   String.fromCharCode.apply(null, Array.from(inputBuffer))
       // );
-      // This function is only provided for compatibility with legacy web platform APIs and should never be used in new code, because they use strings to represent binary data and predate the introduction of typed arrays in JavaScript. For code running using Node.js APIs, converting between base64-encoded strings and binary data should be performed using Buffer.from(str, 'base64') and buf.toString('base64').
       const base64data = btoa(
         String.fromCharCode(...new Uint8Array(inputBuffer.buffer))
       );
@@ -290,18 +328,23 @@ const WebSocketClient = () => {
       }
 
       // Decode base64 audio data
-      // const binaryData = atob(audioData);
-      // const arrayBuffer = new ArrayBuffer(binaryData.length);
-      // const view = new Uint8Array(arrayBuffer);
-      // for (let i = 0; i < binaryData.length; i++) {
-      //   view[i] = binaryData.charCodeAt(i);
-      // }
-      const arrayBuffer = Uint8Array.from(atob(audioData), (c) =>
-        c.charCodeAt(0)
-      ).buffer;
+      console.log(audioData.slice(0, 100));
+      const binaryData = atob(audioData);
+      const arrayBuffer = new ArrayBuffer(binaryData.length);
+      const view = new Uint8Array(arrayBuffer);
+      for (let i = 0; i < binaryData.length; i++) {
+        view[i] = binaryData.charCodeAt(i);
+      }
+      // console.log("audioData", audioData);
+      // const arrayBuffer = Uint8Array.from(atob(audioData), (c) =>
+      //   c.charCodeAt(0)
+      // ).buffer;
       // Decode audio data and play it
+      // Convert PCM to WAV by adding WAV header
+      const wavBuffer = encodeWAV(view, sampleRate, 1, 16); // 16 is the bits per sample if linear 16
+
       const audioBuffer = await audioContextRef.current.decodeAudioData(
-        arrayBuffer
+        wavBuffer
       );
       const source = audioContextRef.current.createBufferSource();
       source.buffer = audioBuffer;
@@ -360,7 +403,10 @@ const WebSocketClient = () => {
           </Button>
         </div>
 
-        <div className="flex items-center justify-center p-4">
+        <div
+          className="flex items-center justify-center p-4"
+          onClick={() => setIsRecording(!isRecording)}
+        >
           {isRecording ? (
             <Mic className="h-12 w-12 text-green-500 animate-pulse" />
           ) : (
