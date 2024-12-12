@@ -297,6 +297,44 @@ const WebSocketClient = () => {
     };
   };
 
+  const listAudioDevices = async () => {
+    // Get both input and output devices
+    const devices = await navigator.mediaDevices.enumerateDevices();
+
+    // Log each device
+    for (const device of devices) {
+      if (device.kind === "audiooutput" || device.kind === "audioinput") {
+        console.log(`Type: ${device.kind}`);
+        console.log(`Label: ${device.label}`);
+        console.log(`ID: ${device.deviceId}`);
+
+        // Try to get capabilities for input devices
+        if (device.kind === "audioinput") {
+          try {
+            const constraints = {
+              audio: {
+                deviceId: { exact: device.deviceId },
+                sampleRate: { ideal: 48000 }, // Try a common rate
+              },
+            };
+
+            const stream = await navigator.mediaDevices.getUserMedia(
+              constraints
+            );
+            const track = stream.getAudioTracks()[0];
+            const capabilities = track.getCapabilities();
+            console.log("Capabilities:", capabilities);
+
+            // Clean up
+            stream.getTracks().forEach((track) => track.stop());
+          } catch (e) {
+            console.log("Could not get capabilities:", e);
+          }
+        }
+        console.log("-------------------");
+      }
+    }
+  };
   const stopRecording = () => {
     if (
       mediaRecorderRef.current &&
@@ -324,7 +362,9 @@ const WebSocketClient = () => {
   const playAudio = async (audioData: string) => {
     try {
       if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContext();
+        audioContextRef.current = new AudioContext({
+          sampleRate,
+        });
       }
 
       // Decode base64 audio data
@@ -391,6 +431,7 @@ const WebSocketClient = () => {
             <Phone className="mr-2 h-4 w-4" />
             Connect
           </Button>
+          <Button onClick={listAudioDevices}>sampling</Button>
 
           <Button
             onClick={disconnect}
