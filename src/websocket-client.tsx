@@ -187,24 +187,26 @@ interface WebSocketConfig {
   channelCount?: number;
 }
 
-interface UseWebSocketAudioReturn {
-  isConnected: boolean;
-  isRecording: boolean;
-  error: string;
-  messages: WebSocketMessage[];
-  connect: (profileId?: string) => void;
-  disconnect: () => void;
-  toggleRecording: () => void;
-}
+// interface UseWebSocketAudioReturn {
+//   isConnected: boolean;
+//   isMuted: boolean;
+//   error: string;
+//   messages: WebSocketMessage[];
+//   connect: (profileId?: string) => void;
+//   disconnect: () => void;
+//   toggleMute: () => void;
+// }
 
 export const useWebSocketAudio = ({
   url,
   sampleRate = 48000,
   chunkSize = 2048,
   channelCount = 1,
-}: WebSocketConfig): UseWebSocketAudioReturn => {
+}: WebSocketConfig) => {
   const [isConnected, setIsConnected] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const isMutedRef = useRef(false);
+
   const [messages, setMessages] = useState<WebSocketMessage[]>([]);
   const [error, setError] = useState("");
 
@@ -286,23 +288,27 @@ export const useWebSocketAudio = ({
       processor.connect(audioContextRef.current.destination);
 
       processor.onaudioprocess = (event) => {
-        const inputBuffer = event.inputBuffer.getChannelData(0);
-        const base64data = btoa(
-          String.fromCharCode(...new Uint8Array(inputBuffer.buffer))
-        );
+        if (!isMutedRef.current) {
+          const inputBuffer = event.inputBuffer.getChannelData(0);
 
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(
-            JSON.stringify({
-              type: "websocket_audio",
-              data: base64data,
-            })
+          const base64data = btoa(
+            String.fromCharCode(...new Uint8Array(inputBuffer.buffer))
           );
+
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(
+              JSON.stringify({
+                type: "websocket_audio",
+                data: base64data,
+              })
+            );
+          }
         }
       };
 
       processorRef.current = processor;
-      setIsRecording(true);
+      setIsMuted(false);
+      isMutedRef.current = false;
     } catch (err) {
       console.error("Error starting recording:", err);
       setError("Failed to start recording");
@@ -318,7 +324,8 @@ export const useWebSocketAudio = ({
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
-    setIsRecording(false);
+    setIsMuted(true);
+    isMutedRef.current = true;
   };
 
   const connect = (profileId?: string) => {
@@ -391,42 +398,40 @@ export const useWebSocketAudio = ({
     setIsConnected(false);
   };
 
-  const toggleRecording = () => {
-    if (isRecording) {
-      stopRecording();
-    } else {
-      startRecording();
-    }
+  const toggleMute = () => {
+    const newMutedState = !isMuted;
+    setIsMuted(newMutedState);
+    isMutedRef.current = newMutedState;
   };
 
   useEffect(() => {
     return () => {
       disconnect();
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
+      // if (audioContextRef.current) {
+      //   audioContextRef.current.close();
+      // }
     };
   }, []);
 
   return {
     isConnected,
-    isRecording,
+    isMuted,
     error,
     messages,
     connect,
     disconnect,
-    toggleRecording,
+    toggleMute,
   };
 };
 const WebSocketClient = () => {
   const {
     isConnected,
-    isRecording,
+    isMuted,
     error,
     messages,
     connect,
     disconnect,
-    toggleRecording,
+    toggleMute,
   } = useWebSocketAudio({
     url: "ws://localhost:3000/websocket_call",
     sampleRate: 48000,
@@ -499,7 +504,6 @@ const WebSocketClient = () => {
             Connect
           </Button>
           <Button onClick={listAudioDevices}>sampling</Button>
-
           <Button
             onClick={disconnect}
             disabled={!isConnected}
@@ -511,16 +515,13 @@ const WebSocketClient = () => {
           </Button>
         </div>
 
-        <div
-          className="flex items-center justify-center p-4"
-          onClick={() => toggleRecording()}
-        >
-          {isRecording ? (
+        <Button onClick={toggleMute} disabled={!isConnected} variant="outline">
+          {!isMuted ? (
             <Mic className="h-12 w-12 text-green-500 animate-pulse" />
           ) : (
             <MicOff className="h-12 w-12 text-gray-300" />
           )}
-        </div>
+        </Button>
 
         <div className="h-64 overflow-y-auto border rounded-lg p-4 space-y-2">
           {messages.map((message, index) => (
