@@ -108,6 +108,13 @@ interface SynthesizerConfig {
   should_encode_as_wav: boolean;
   sentiment_config?: SentimentConfig;
 }
+
+// Add this interface near the top with other interfaces
+interface AudioInputBuffer {
+  timestamp: number;
+  data: Float32Array;
+}
+
 // WebSocket Message Types
 type WebSocketMessage =
   | {
@@ -218,6 +225,37 @@ export const useWebSocketAudio = ({
   const isPlayingRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // Add input queue ref
+  const inputQueueRef = useRef<AudioInputBuffer[]>([]);
+  // const processingInputRef = useRef(false);
+
+  const processInputQueue = () => {
+    // if (processingInputRef.current || isMutedRef.current) {
+    //   return;
+    // }
+
+    // processingInputRef.current = true;
+
+    while (inputQueueRef.current.length > 0 && !isMutedRef.current) {
+      const inputBuffer = inputQueueRef.current.shift();
+
+      if (inputBuffer && wsRef.current?.readyState === WebSocket.OPEN) {
+        const base64data = btoa(
+          String.fromCharCode(...new Uint8Array(inputBuffer.data.buffer))
+        );
+
+        wsRef.current.send(
+          JSON.stringify({
+            type: "websocket_audio",
+            data: base64data,
+          })
+        );
+      }
+    }
+
+    // processingInputRef.current = false;
+  };
+
   const playNextInQueue = async () => {
     if (audioQueueRef.current.length === 0 || isPlayingRef.current) {
       return;
@@ -288,21 +326,15 @@ export const useWebSocketAudio = ({
       processor.connect(audioContextRef.current.destination);
 
       processor.onaudioprocess = (event) => {
+        const inputData = event.inputBuffer.getChannelData(0);
+
+        // Only enqueue if not muted
         if (!isMutedRef.current) {
-          const inputBuffer = event.inputBuffer.getChannelData(0);
-
-          const base64data = btoa(
-            String.fromCharCode(...new Uint8Array(inputBuffer.buffer))
-          );
-
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(
-              JSON.stringify({
-                type: "websocket_audio",
-                data: base64data,
-              })
-            );
-          }
+          inputQueueRef.current.push({
+            timestamp: Date.now(),
+            data: new Float32Array(inputData),
+          });
+          processInputQueue();
         }
       };
 
@@ -324,6 +356,8 @@ export const useWebSocketAudio = ({
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+    // Clear input queue
+    inputQueueRef.current = [];
     setIsMuted(true);
     isMutedRef.current = true;
   };
