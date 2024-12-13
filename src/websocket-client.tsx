@@ -145,6 +145,8 @@ const writeString = (view: DataView, offset: number, string: string) => {
     view.setUint8(offset + i, string.charCodeAt(i));
   }
 };
+// useWebSocketAudio.ts
+
 const encodeWAV = (
   pcmData: Uint8Array,
   sampleRate: number,
@@ -157,77 +159,204 @@ const encodeWAV = (
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
 
-  // Wav header
-  writeString(view, 0, "RIFF"); /* RIFF identifier */
-  view.setUint32(4, 36 + dataSize, true); /* file length */
-  writeString(view, 8, "WAVE"); /* RIFF type */
-  writeString(view, 12, "fmt "); /* format chunk identifier */
-  view.setUint32(16, 16, true); /* format chunk length */
-  view.setUint16(20, 1, true); /* sample format (raw) */
-  view.setUint16(22, numChannels, true); /* channel count */
-  view.setUint32(24, sampleRate, true); /* sample rate */
-  view.setUint32(28, byteRate, true); /* byte rate */
-  view.setUint16(32, blockAlign, true); /* block align */
-  view.setUint16(34, bitsPerSample, true); /* bits per sample */
-  writeString(view, 36, "data"); /* data chunk identifier */
-  view.setUint32(40, dataSize, true); /* data chunk length */
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(view, 8, "WAVE");
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(view, 36, "data");
+  view.setUint32(40, dataSize, true);
 
   for (let i = 0; i < pcmData.length; i++) {
-    // concat data
     view.setUint8(44 + i, pcmData[i]);
   }
 
   return buffer;
 };
 
-const WebSocketClient = () => {
+interface WebSocketConfig {
+  url: string;
+  sampleRate?: number;
+  chunkSize?: number;
+  channelCount?: number;
+}
+
+interface UseWebSocketAudioReturn {
+  isConnected: boolean;
+  isRecording: boolean;
+  error: string;
+  messages: WebSocketMessage[];
+  connect: (profileId?: string) => void;
+  disconnect: () => void;
+  toggleRecording: () => void;
+}
+
+export const useWebSocketAudio = ({
+  url,
+  sampleRate = 48000,
+  chunkSize = 2048,
+  channelCount = 1,
+}: WebSocketConfig): UseWebSocketAudioReturn => {
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [messages, setMessages] = useState<WebSocketMessage[]>([]);
   const [error, setError] = useState("");
 
+  // Refs
   const wsRef = useRef<WebSocket | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const audioQueueRef = useRef<string[]>([]);
+  const isPlayingRef = useRef(false);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  const connectWebSocket = (aiProfileId: number) => {
+  const playNextInQueue = async () => {
+    if (audioQueueRef.current.length === 0 || isPlayingRef.current) {
+      return;
+    }
+
+    isPlayingRef.current = true;
+    const audioData = audioQueueRef.current.shift();
+
     try {
-      const ws = new WebSocket(
-        `ws://localhost:3000/websocket_call/${aiProfileId}`
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext({ sampleRate });
+      }
+
+      const binaryData = atob(audioData!);
+      const arrayBuffer = new ArrayBuffer(binaryData.length);
+      const view = new Uint8Array(arrayBuffer);
+
+      for (let i = 0; i < binaryData.length; i++) {
+        view[i] = binaryData.charCodeAt(i);
+      }
+
+      const wavBuffer = encodeWAV(view, sampleRate, channelCount, 16);
+      const audioBuffer = await audioContextRef.current.decodeAudioData(
+        wavBuffer
       );
+
+      const source = audioContextRef.current.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContextRef.current.destination);
+
+      source.onended = () => {
+        isPlayingRef.current = false;
+        playNextInQueue();
+      };
+
+      source.start();
+    } catch (err) {
+      console.error("Error playing audio:", err);
+      isPlayingRef.current = false;
+      playNextInQueue();
+    }
+  };
+
+  const queueAudio = (audioData: string) => {
+    audioQueueRef.current.push(audioData);
+    if (!isPlayingRef.current) {
+      playNextInQueue();
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext({ sampleRate });
+      }
+
+      const source = audioContextRef.current.createMediaStreamSource(stream);
+      const processor = audioContextRef.current.createScriptProcessor(
+        chunkSize,
+        channelCount,
+        channelCount
+      );
+
+      source.connect(processor);
+      processor.connect(audioContextRef.current.destination);
+
+      processor.onaudioprocess = (event) => {
+        const inputBuffer = event.inputBuffer.getChannelData(0);
+        const base64data = btoa(
+          String.fromCharCode(...new Uint8Array(inputBuffer.buffer))
+        );
+
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({
+              type: "websocket_audio",
+              data: base64data,
+            })
+          );
+        }
+      };
+
+      processorRef.current = processor;
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Error starting recording:", err);
+      setError("Failed to start recording");
+    }
+  };
+
+  const stopRecording = () => {
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    setIsRecording(false);
+  };
+
+  const connect = (profileId?: string) => {
+    try {
+      const ws = new WebSocket(url);
 
       ws.onopen = () => {
         setIsConnected(true);
         setError("");
 
         const configMessage = {
-          type: WebSocketMessageType.AUDIO_CONFIG_START,
+          type: "websocket_audio_config_start",
           input_audio_config: {
-            audio_encoding: AudioEncoding.LINEAR16, // this is done on the python side
-            sampling_rate: 48000,
-            chunk_size: 2048, // Added required chunk_size
-            audio_channel_count: 1,
+            audio_encoding: "linear16",
+            sampling_rate: sampleRate,
+            chunk_size: chunkSize,
+            audio_channel_count: channelCount,
           },
           output_audio_config: {
-            audio_encoding: AudioEncoding.LINEAR16,
-            sampling_rate: 48000,
-            audio_channel_count: 1,
+            audio_encoding: "linear16",
+            sampling_rate: sampleRate,
+            audio_channel_count: channelCount,
           },
           subscribe_transcript: true,
-        } satisfies WebSocketMessage;
+          conversation_id: profileId,
+        };
         ws.send(JSON.stringify(configMessage));
       };
 
       ws.onmessage = (event) => {
         try {
-          const message = JSON.parse(event.data) as WebSocketMessage;
-          console.log("Received message:", message); // Debug log
+          const message = JSON.parse(event.data);
           setMessages((prev) => [...prev, message]);
 
-          if (message.type === WebSocketMessageType.READY) {
+          if (message.type === "websocket_ready") {
             startRecording();
-          } else if (message.type === WebSocketMessageType.AUDIO) {
-            playAudio(message.data);
+          } else if (message.type === "websocket_audio") {
+            queueAudio(message.data);
           }
         } catch (err) {
           console.error("Error parsing message:", err);
@@ -235,8 +364,8 @@ const WebSocketClient = () => {
         }
       };
 
-      ws.onerror = (error) => {
-        console.error("WebSocket error:", error);
+      ws.onerror = (err) => {
+        console.error("WebSocket error:", err);
         setError("WebSocket error occurred");
       };
 
@@ -251,51 +380,59 @@ const WebSocketClient = () => {
       setError("Failed to connect to WebSocket server");
     }
   };
-  const sampleRate = 48000; // Match the server and your desired rate
-  const chunkSize = 2048;
 
-  const startRecording = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const disconnect = () => {
+    if (wsRef.current) {
+      wsRef.current.send(JSON.stringify({ type: "websocket_stop" }));
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    stopRecording();
+    setIsConnected(false);
+  };
 
-    // Create AudioContext and connect the stream
-    const audioContext = new AudioContext({ sampleRate });
-    const source = audioContext.createMediaStreamSource(stream);
+  const toggleRecording = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
 
-    // Create a ScriptProcessorNode with a 2048 frame buffer
-    const processor = audioContext.createScriptProcessor(chunkSize, 1, 1);
-    source.connect(processor);
-    processor.connect(audioContext.destination);
-
-    processor.onaudioprocess = (event) => {
-      // Give up on webm encoding ;(
-      // Webm not sending the raw bytes
-      const inputBuffer = event.inputBuffer.getChannelData(0);
-
-      // Convert int16 to base64
-      // const uint8View = new Uint8Array(inputBuffer.buffer);
-      // const int8 = Array.from(uint8View);
-      // const base64data = btoa(String.fromCharCode.apply(null, int8));
-
-      // const base64data = btoa(
-      //   String.fromCharCode.apply(null, Array.from(inputBuffer))
-      // );
-      const base64data = btoa(
-        String.fromCharCode(...new Uint8Array(inputBuffer.buffer))
-      );
-      // Only works in node
-      // const base64data = Buffer.from(inputBuffer).toString("base64");
-      // console.assert(method2 === base64data, "method2 !== base64data");
-
-      // Send via WebSocket
-      const audioMessage = {
-        type: "websocket_audio", // your message type
-        data: base64data,
-      };
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify(audioMessage));
+  useEffect(() => {
+    return () => {
+      disconnect();
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
       }
     };
+  }, []);
+
+  return {
+    isConnected,
+    isRecording,
+    error,
+    messages,
+    connect,
+    disconnect,
+    toggleRecording,
   };
+};
+const WebSocketClient = () => {
+  const {
+    isConnected,
+    isRecording,
+    error,
+    messages,
+    connect,
+    disconnect,
+    toggleRecording,
+  } = useWebSocketAudio({
+    url: "ws://localhost:3000/websocket_call",
+    sampleRate: 48000,
+    chunkSize: 2048,
+    channelCount: 1,
+  });
 
   const listAudioDevices = async () => {
     // Get both input and output devices
@@ -335,76 +472,6 @@ const WebSocketClient = () => {
       }
     }
   };
-  const stopRecording = () => {
-    if (
-      mediaRecorderRef.current &&
-      mediaRecorderRef.current.state !== "inactive"
-    ) {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream
-        .getTracks()
-        .forEach((track) => track.stop());
-    }
-    setIsRecording(false);
-  };
-
-  const disconnect = () => {
-    if (wsRef.current) {
-      const stopMessage = {
-        type: WebSocketMessageType.STOP,
-      } satisfies WebSocketMessage;
-      wsRef.current.send(JSON.stringify(stopMessage));
-      wsRef.current.close();
-    }
-    stopRecording();
-  };
-
-  const playAudio = async (audioData: string) => {
-    try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContext({
-          sampleRate,
-        });
-      }
-
-      // Decode base64 audio data
-      console.log(audioData.slice(0, 100));
-      const binaryData = atob(audioData);
-      const arrayBuffer = new ArrayBuffer(binaryData.length);
-      const view = new Uint8Array(arrayBuffer);
-      for (let i = 0; i < binaryData.length; i++) {
-        view[i] = binaryData.charCodeAt(i);
-      }
-      // console.log("audioData", audioData);
-      // const arrayBuffer = Uint8Array.from(atob(audioData), (c) =>
-      //   c.charCodeAt(0)
-      // ).buffer;
-      // Decode audio data and play it
-      // Convert PCM to WAV by adding WAV header
-      const wavBuffer = encodeWAV(view, sampleRate, 1, 16); // 16 is the bits per sample if linear 16
-
-      const audioBuffer = await audioContextRef.current.decodeAudioData(
-        wavBuffer
-      );
-      const source = audioContextRef.current.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioContextRef.current.destination);
-      source.start();
-    } catch (err) {
-      console.error("Error playing audio:", err);
-      setError("Failed to play audio response");
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      disconnect();
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
-    };
-  }, []);
-
   return (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
@@ -424,7 +491,7 @@ const WebSocketClient = () => {
 
         <div className="flex space-x-2">
           <Button
-            onClick={() => connectWebSocket(145)}
+            onClick={() => connect()}
             disabled={isConnected}
             className="flex-1"
           >
@@ -446,7 +513,7 @@ const WebSocketClient = () => {
 
         <div
           className="flex items-center justify-center p-4"
-          onClick={() => setIsRecording(!isRecording)}
+          onClick={() => toggleRecording()}
         >
           {isRecording ? (
             <Mic className="h-12 w-12 text-green-500 animate-pulse" />
