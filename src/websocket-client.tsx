@@ -2,6 +2,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { StateAgentTranscript } from "@/types/state-agent-transcript";
 import { Mic, MicOff, Phone, PhoneOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -14,6 +15,7 @@ enum WebSocketMessageType {
   READY = "websocket_ready",
   STOP = "websocket_stop",
   AUDIO_CONFIG_START = "websocket_audio_config_start",
+  DEBUG_TRANSCRIPT = "websocket_debug_transcript",
 }
 
 enum EventType {
@@ -93,7 +95,11 @@ interface TranscriberConfig {
   sampling_rate: number;
   audio_encoding: AudioEncoding;
   chunk_size?: number;
-  endpointing_config?: any;
+  endpointing_config?: {
+    type: string;
+    time_threshold?: number;
+    // Add other specific config properties as needed
+  };
 }
 
 interface AgentConfig {
@@ -146,6 +152,10 @@ type WebSocketMessage =
     }
   | {
       type: WebSocketMessageType.STOP;
+    }
+  | {
+      type: WebSocketMessageType.DEBUG_TRANSCRIPT;
+      transcript: StateAgentTranscript;
     };
 const writeString = (view: DataView, offset: number, string: string) => {
   for (let i = 0; i < string.length; i++) {
@@ -204,7 +214,7 @@ interface WebSocketConfig {
 //   toggleMute: () => void;
 // }
 
-export const useWebSocketAudio = ({
+const useWebSocketAudio = ({
   url,
   sampleRate = 48000,
   chunkSize = 2048,
@@ -238,6 +248,7 @@ export const useWebSocketAudio = ({
 
     while (inputQueueRef.current.length > 0 && !isMutedRef.current) {
       const inputBuffer = inputQueueRef.current.shift();
+      // console.log("inputBuffer", inputBuffer);
 
       if (inputBuffer && wsRef.current?.readyState === WebSocket.OPEN) {
         const base64data = btoa(
@@ -362,9 +373,9 @@ export const useWebSocketAudio = ({
     isMutedRef.current = true;
   };
 
-  const connect = (profileId?: string) => {
+  const connect = (profileId: number) => {
     try {
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(`${url}/${profileId}`);
 
       ws.onopen = () => {
         setIsConnected(true);
@@ -384,20 +395,24 @@ export const useWebSocketAudio = ({
             audio_channel_count: channelCount,
           },
           subscribe_transcript: true,
-          conversation_id: profileId,
+          // conversation_id: profileId,
         };
         ws.send(JSON.stringify(configMessage));
       };
 
       ws.onmessage = (event) => {
         try {
-          const message = JSON.parse(event.data);
+          const message = JSON.parse(event.data) as WebSocketMessage;
           setMessages((prev) => [...prev, message]);
 
           if (message.type === "websocket_ready") {
             startRecording();
           } else if (message.type === "websocket_audio") {
             queueAudio(message.data);
+          } else if (message.type === "websocket_debug_transcript") {
+            console.table(message.transcript.entries);
+          } else {
+            console.log("message", message);
           }
         } catch (err) {
           console.error("Error parsing message:", err);
@@ -530,7 +545,7 @@ const WebSocketClient = () => {
 
         <div className="flex space-x-2">
           <Button
-            onClick={() => connect()}
+            onClick={() => connect(921)}
             disabled={isConnected}
             className="flex-1"
           >
