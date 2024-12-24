@@ -15,7 +15,7 @@ enum WebSocketMessageType {
   READY = "websocket_ready",
   STOP = "websocket_stop",
   AUDIO_CONFIG_START = "websocket_audio_config_start",
-  DEBUG_TRANSCRIPT = "websocket_debug_transcript",
+  JSON_TRANSCRIPT = "websocket_json_transcript",
 }
 
 enum EventType {
@@ -154,7 +154,7 @@ type WebSocketMessage =
       type: WebSocketMessageType.STOP;
     }
   | {
-      type: WebSocketMessageType.DEBUG_TRANSCRIPT;
+      type: WebSocketMessageType.JSON_TRANSCRIPT;
       transcript: StateAgentTranscript;
     };
 const writeString = (view: DataView, offset: number, string: string) => {
@@ -405,11 +405,12 @@ const useWebSocketAudio = ({
           const message = JSON.parse(event.data) as WebSocketMessage;
           setMessages((prev) => [...prev, message]);
 
-          if (message.type === "websocket_ready") {
+          if (message.type === WebSocketMessageType.READY) {
             startRecording();
-          } else if (message.type === "websocket_audio") {
+          } else if (message.type === WebSocketMessageType.AUDIO) {
             queueAudio(message.data);
-          } else if (message.type === "websocket_debug_transcript") {
+          } else if (message.type === WebSocketMessageType.JSON_TRANSCRIPT) {
+            console.log(message.transcript);
             console.table(message.transcript.entries);
           } else {
             console.log("message", message);
