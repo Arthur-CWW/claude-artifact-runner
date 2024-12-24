@@ -254,6 +254,7 @@ const useWebSocketAudio = ({
         const base64data = btoa(
           String.fromCharCode(...new Uint8Array(inputBuffer.data.buffer))
         );
+        // console.log("base64data", base64data);
 
         wsRef.current.send(
           JSON.stringify({
@@ -297,23 +298,23 @@ const useWebSocketAudio = ({
       source.buffer = audioBuffer;
       source.connect(audioContextRef.current.destination);
 
-      source.onended = () => {
+      source.onended = async () => {
         isPlayingRef.current = false;
-        playNextInQueue();
+        await playNextInQueue();
       };
 
       source.start();
     } catch (err) {
       console.error("Error playing audio:", err);
       isPlayingRef.current = false;
-      playNextInQueue();
+      await playNextInQueue();
     }
   };
 
-  const queueAudio = (audioData: string) => {
+  const queueAudio = async (audioData: string) => {
     audioQueueRef.current.push(audioData);
     if (!isPlayingRef.current) {
-      playNextInQueue();
+      await playNextInQueue();
     }
   };
 
@@ -336,7 +337,7 @@ const useWebSocketAudio = ({
       source.connect(processor);
       processor.connect(audioContextRef.current.destination);
 
-      processor.onaudioprocess = (event) => {
+      processor.onaudioprocess = async (event) => {
         const inputData = event.inputBuffer.getChannelData(0);
 
         // Only enqueue if not muted
@@ -345,7 +346,7 @@ const useWebSocketAudio = ({
             timestamp: Date.now(),
             data: new Float32Array(inputData),
           });
-          processInputQueue();
+          await processInputQueue();
         }
       };
 
